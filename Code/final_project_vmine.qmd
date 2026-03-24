@@ -1,0 +1,810 @@
+---
+title: "Untitled"
+format: html
+---
+```{r, message=FALSE}
+#| output: False
+#| echo: true
+#| eval: false
+
+
+# name: Will Sovine, Stephen Stull, Travis Darby
+# date: 03/25/23
+# assignment name: Final Project Code
+# goal of program: Conduct EDA on data for the purpose creating decision tree, 
+#                  random forest, knn, and logistic regression models to predict
+#                  whether or not cells are Maligant or Benign. 
+# data files used: FNA_cancer.csv
+```
+
+# Data/Library Import
+```{r, message=FALSE}
+
+# Import packages
+library(tidyverse)
+library(tidymodels)
+library(rpart)
+library(partykit)
+library(randomForest)
+library(class)
+library(caret)
+library(MASS, include.only = 'stepAIC')
+
+
+cancer <- read.csv("../Final Project/FNA_cancer.csv")
+attach(cancer)
+```
+
+
+
+
+
+# EDA
+
+## proportions
+```{r}
+table(cancer$diagnosis)/nrow(cancer)
+```
+
+
+## data melt
+
+```{r}
+library(reshape2)
+
+?melt
+
+cancer[-1]
+
+cancer_melt <- melt(cancer[-1])
+
+
+head(cancer_melt)
+```
+### All boxplots - no good
+```{r}
+cancer_melt %>% ggplot(aes(x=variable, y=value))+geom_boxplot(aes(fill=diagnosis))
+```
+
+### all variables facet wrapped - also no good
+```{r}
+cancer_melt %>% ggplot(aes(x=variable, y=value, color=diagnosis)) + geom_boxplot() + 
+  facet_wrap( ~ variable, scales = "free") + 
+  scale_color_manual(values = c("#4EA2D0","#1F5673"))
+```
+### plot function definition
+
+```{r}
+#"clean boxplot" (no jitter)
+
+#function takes 4 arguemnets (3 variables and one for the plot title, all strings)
+facet_plot_function_plain <- function(variable_1,variable_2,variable_3, plot_variable){
+  #second half of title string variable
+  title_string_2 <- "Values Split by Diagnosis"
+  #filters melted dataset to just the requested variables
+  cancer_melt %>% 
+  filter((variable == variable_1) | (variable == variable_2) | (variable== variable_3)) %>%
+  #plots on boxplots in facet wrap fashion.
+  ggplot(aes(x=variable, y=value, color=diagnosis)) + geom_boxplot() + 
+  facet_wrap( ~ variable, scales = "free") + 
+  #custom colors for outline of boxplots and changing the labels of the legend
+  scale_color_manual(values = c("#4EA2D0","#1F5673"), name = "Diagnosis", labels=c("Benign", "Malignant")) +
+  #labels for title and axis
+  labs(title = paste(plot_variable, title_string_2), x="", y="Measurements")
+}
+
+#jitter boxplot facet wrap plots
+
+#function takes 4 arguments (3 variables and one for the plot title, all strings)
+facet_plot_function_jitter <- function(variable_1,variable_2,variable_3, plot_variable){
+  #second half of title string variable
+  title_string_2 <- "Values Split by Diagnosis"
+  #filters melted dataset to just the requested variables
+  cancer_melt %>% 
+  filter((variable == variable_1) | (variable == variable_2) | (variable== variable_3)) %>%
+  #plots on boxplots in facet wrap fashion.
+  ggplot(aes(x=variable, y=value, color=diagnosis)) + geom_boxplot() + 
+  #plotting points and jittering them over the boxplots
+  geom_point(alpha=0.4, aes(y=value, color=diagnosis), position = position_jitterdodge(jitter.width = .223)) +
+  facet_wrap( ~ variable, scales = "free") + 
+  #custom colors for outline of boxplots and changing the labels of the legend
+  scale_color_manual(values = c("#4EA2D0","#1F5673"), name = "Diagnosis", labels=c("Benign", "Malignant")) +
+  #labels for title and axis
+  labs(title = paste(plot_variable, title_string_2), x="", y="Measurements")
+}
+```
+
+
+
+## Radius
+```{r}
+# Mean, SE, and Max are all higher for Malignant
+# Mean
+cancer %>% ggplot(
+  aes(x=radius_mean, y=diagnosis)
+) + geom_boxplot() + geom_jitter(alpha=0.5, width = .2)
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=radius_se, y=factor(diagnosis, labels = c("Malignant", "Benign")), color=diagnosis)) + 
+  geom_boxplot(size=.75, outlier.shape = 1, outlier.color = "black", outlier.size = 3) +
+  geom_jitter(alpha=0.4, width = .1, height = .25) +
+  scale_color_manual(values = c("#4EA2D0","#1F5673")) +
+  labs(title = "Radius", subtitle = "Standard Error",x="Standard Error", y="Diagnosis") + 
+  guides(color="none") + theme_minimal()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=radius_worst, y=diagnosis)
+) + geom_boxplot() +
+  labs(title = "Title test", subtitle = "subtitle Test",x="radius Worst", y="Diagnosis")
+```
+
+###radius melt facet
+
+```{r}
+facet_plot_function_plain("radius_mean","radius_se","radius_worst", "Radius")
+
+facet_plot_function_jitter("radius_mean","radius_se","radius_worst", "Radius")
+
+```
+
+
+
+
+## Texture
+```{r}
+# Mean and Max are slightly higher for Malignant, SE is about the same.
+# Mean
+cancer %>% ggplot(
+  aes(x=texture_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=texture_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=texture_worst, y=diagnosis)
+) + geom_boxplot()
+
+```
+### Texture melt facet
+
+```{r}
+
+facet_plot_function_plain("texture_mean","texture_se" ,"texture_worst", "Texture")
+
+facet_plot_function_jitter("texture_mean","texture_se" ,"texture_worst", "Texture")
+```
+
+
+## Perimeter
+```{r}
+# Mean, SE, and Max are all higher for Malignant
+# Mean
+cancer %>% ggplot(
+  aes(x=perimeter_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=perimeter_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=perimeter_worst, y=diagnosis)
+) + geom_boxplot()
+```
+
+### perimeter melt facet
+
+```{r}
+facet_plot_function_plain("perimeter_mean" ,"perimeter_se", "perimeter_worst", "Perimeter")
+
+facet_plot_function_jitter("perimeter_mean" ,"perimeter_se", "perimeter_worst", "Perimeter")
+```
+
+
+
+
+## Area
+```{r}
+
+# Mean, SE, and Max are all higher for Malignant
+# Mean
+cancer %>% ggplot(
+  aes(x=area_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=area_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=area_worst, y=diagnosis)
+) + geom_boxplot()
+
+```
+### Area melt facet
+
+```{r}
+facet_plot_function_plain("area_mean","area_se","area_worst", "Area")
+
+facet_plot_function_jitter("area_mean","area_se","area_worst", "Area")
+```
+
+
+
+## Smoothness
+```{r}
+
+
+# Mean and Max are slightly higher for Malignant. SE is about the same.
+# Mean
+cancer %>% ggplot(
+  aes(x=smoothness_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=smoothness_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=smoothness_worst, y=diagnosis)
+) + geom_boxplot()
+
+```
+
+### smoothness melt facet
+
+```{r}
+facet_plot_function_plain("smoothness_mean","smoothness_se","smoothness_worst","Smoothness")
+
+facet_plot_function_jitter("smoothness_mean","smoothness_se","smoothness_worst","Smoothness")
+```
+
+
+## Compactness
+```{r}
+# Mean, SE, and Max are all slightly higher for Malignant.
+# Mean
+cancer %>% ggplot(
+  aes(x=compactness_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=compactness_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=compactness_worst, y=diagnosis)
+) + geom_boxplot()
+
+```
+### Compactness melt facet
+
+```{r}
+facet_plot_function_plain("compactness_mean","compactness_se","compactness_worst", "Compactness")
+
+facet_plot_function_jitter("compactness_mean","compactness_se","compactness_worst", "Compactness")
+```
+
+
+## Concavity
+```{r}
+# Mean and Max are higher for Malignant. SE is slightly higher.
+# Mean
+cancer %>% ggplot(
+  aes(x=concavity_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=concavity_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=concavity_worst, y=diagnosis)
+) + geom_boxplot()
+```
+### concavity melt facet
+```{r}
+colnames(cancer)
+```
+"concavity_mean","concavity_se","concavity_worst", "Concavity"
+```{r}
+facet_plot_function_plain("concavity_mean","concavity_se","concavity_worst", "Concavity")
+
+facet_plot_function_jitter("concavity_mean","concavity_se","concavity_worst", "Concavity")
+```
+
+
+## Concave Points
+```{r}
+# Mean, SE, and Max are all greater for Malignant
+# Mean
+cancer %>% ggplot(
+  aes(x=concave.points_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=concave.points_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=concave.points_worst, y=diagnosis)
+) + geom_boxplot()
+
+```
+
+### Concave Points melt facet
+
+```{r}
+facet_plot_function_plain("concave.points_mean","concave.points_se","concave.points_worst","Concave Points")
+
+facet_plot_function_jitter("concave.points_mean","concave.points_se","concave.points_worst","Concave Points")
+```
+
+
+## Symmetry 
+```{r}
+
+# Mean and Max are slightly higher for Malignant. SE is about the same.
+# Mean
+cancer %>% ggplot(
+  aes(x=symmetry_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=symmetry_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=symmetry_worst, y=diagnosis)
+) + geom_boxplot()
+
+```
+### Symmetry Melt Facet
+
+```{r}
+facet_plot_function_plain("symmetry_mean","symmetry_se","symmetry_worst", "Symmetry")
+
+facet_plot_function_jitter("symmetry_mean","symmetry_se","symmetry_worst", "Symmetry")
+```
+
+
+## Fractal Dimension
+```{r}
+
+# Mean and SE are pretty similar and Max is slightly higher for Malignant.
+# Mean
+cancer %>% ggplot(
+  aes(x=fractal_dimension_mean, y=diagnosis)
+) + geom_boxplot()
+
+# Standard Error
+cancer %>% ggplot(
+  aes(x=fractal_dimension_se, y=diagnosis)
+) + geom_boxplot()
+
+# Worst
+cancer %>% ggplot(
+  aes(x=fractal_dimension_worst, y=diagnosis)
+) + geom_boxplot()
+
+
+```
+### Fractal Dimension melt
+
+```{r}
+facet_plot_function_plain("fractal_dimension_mean","fractal_dimension_se","fractal_dimension_worst","Fractal Dimension")
+
+facet_plot_function_jitter("fractal_dimension_mean","fractal_dimension_se","fractal_dimension_worst","Fractal Dimension")
+```
+
+
+# Data Preparation
+## Check for NAs
+```{r}
+colSums(is.na(cancer))
+# All columns of X are NA, drop it
+# We don't need the ID column, drop it as well
+cancer.prep <- cancer %>% select(-c(X, id))
+```
+
+## Normalize - needs to be done for KNN classification
+```{r}
+
+minmax <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+
+cancer.prep <- cancer.prep %>%
+  mutate(across(where(is.numeric), minmax))
+
+```
+
+
+
+
+## Set Response as 1, 0 variables - Malign as 1
+```{r}
+cancer.prep <- cancer.prep %>% 
+  mutate(diagnosis = as.factor(ifelse(diagnosis == 'M', 1, 0)))
+
+summary(cancer.prep)
+
+```
+
+
+```{r}
+#head(cancer.prep)
+
+cancer_prep_melt <- melt(cancer.prep)
+
+
+head(cancer_prep_melt)
+```
+
+```{r}
+cancer_prep_melt %>% 
+  ggplot(aes(x=variable, y=value)) + 
+  geom_boxplot(aes(fill=diagnosis)) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  labs(title = "Boxplot of Cancer Data",x = "Variable", y = "Value")
+
+```
+
+
+
+## Split training and testing sets
+```{r}
+
+set.seed(1842)
+sets <- cancer.prep %>%
+  initial_split(prop = 0.8)
+
+train_set <- sets %>% training()
+glimpse(train_set)
+
+test_set <- sets %>% testing()
+glimpse(test_set)
+
+form <- as.formula(diagnosis ~ .)
+
+```
+### malignant/benign proportions
+
+### training set
+```{r}
+#Set Response as 1, 0 variables - Malign as 1
+table(train_set$diagnosis)/nrow(train_set)
+```
+
+
+### test set
+
+```{r}
+table(test_set$diagnosis)/nrow(test_set)
+```
+
+# Models
+
+## Decision Tree
+```{r}
+
+# 92.1% Accuracy, 96.8% Sensitivity
+# Fit the tree
+dt <- rpart(form, data = train_set, cp=0, minsplit=2)
+
+# Plot the tree
+plot(as.party(dt))
+
+# Check CP options
+plotcp(dt)
+
+# Prune
+dt.pruned <- prune(dt, cp=0.019)
+
+# Plot the pruned tree
+plot(as.party(dt.pruned))
+
+# Predict on the test set
+dt.preds <- predict(dt.pruned, test_set, type='class')
+
+# Confusion matrix and performance metrics
+confusionMatrix(dt.preds, as.factor(test_set$diagnosis), positive = '1')
+
+```
+
+
+
+
+## Random Forest
+```{r}
+# 94.7% Accuracy, 96.9% Sensitivity
+# Use variables (mtry) around sqrt of total predictors (33)
+rf <- randomForest(form, data=train_set, mtry=6, ntree=1000)
+print(rf)
+
+# Check variable importance
+varImpPlot(rf, sort=TRUE) 
+
+# Predict on test set
+rf.preds <- predict(rf, test_set, type='class')
+
+# Confusion matrix and performance metrics
+confusionMatrix(rf.preds, as.factor(test_set$diagnosis), positive = '1')
+
+```
+
+### Hyper-tuning mtry
+```{r}
+set.seed(1842)
+#number of mtry
+mtry_values <- seq(1,30, by=1)
+
+#vectors for storing model metrics
+accuracy_results_mtry <- rep(0)
+sensitivity_results_mtry <- rep(0)
+specificity_results_mtry <- rep(0)
+
+#loop for each number of mtry for the model
+for(i in seq_along(mtry_values)){
+  mtry <- mtry_values[i]
+  #fitting model with various values of mtry
+  rf_temp <- randomForest(form, data=train_set, mtry=mtry, ntree=1000)
+  #making predictions
+  rf_temp_preds <- predict(rf_temp, test_set, type='class')
+  
+  #creating confusion matrix
+  test_table <- table(rf_temp_preds, test_set$diagnosis) 
+  
+  #true negatives
+  tn <- test_table[1]
+  #flase positives
+  fp <- test_table[2]
+  #flase negatives
+  fn <- test_table[3]
+  #true positives
+  tp <- test_table[4]
+  
+  #creating accuracy, sensitivity, specificity metrics
+  accuracy_results_mtry[i] <- ((tp+tn)/(tp+fp+tn+fn))
+  sensitivity_results_mtry[i] <- (tp)/(tp+fn)
+  specificity_results_mtry[i] <- (tn)/(tn+fp)
+}
+
+#data frame for accuracy, sensitivity, specificity results
+mtry_results <- data.frame(mtry_values, accuracy_results_mtry, sensitivity_results_mtry, specificity_results_mtry)
+# finding max index for accuracy, sensitivity, specificity results
+mtry_acc_max <- which.max(mtry_results$accuracy_results_mtry)
+mtry_sens_max <- which.max(mtry_results$sensitivity_results_mtry)
+mtry_spec_max <- which.max(mtry_results$specificity_results_mtry)
+
+#displaying max result for accuracy, sensitivity, specificity
+mtry_results[mtry_acc_max,]
+mtry_results[mtry_sens_max,]
+mtry_results[mtry_spec_max,]
+
+#plot mtry accuracy results
+plot(x=mtry_values, y=accuracy_results_mtry, type='l', col='red',xlab = "mtry", ylab = "results", xlim = c(0, 35), ylim = c(.9, 1))
+#plot mtry sensitivity results
+lines(mtry_values, sensitivity_results_mtry, col='blue', type='l')
+#plot mtry specificity results
+lines(mtry_values, specificity_results_mtry, col='green', type='l')
+#legend and title
+legend("bottomright", legend = c("Accuracy", "Sensitivity", "Specificity"), col = c("red","blue","green"), lty=1)
+title(main='values of mtry')
+
+```
+
+### Hyper-tuning number of trees
+```{r}
+set.seed(1842)
+#number of trees from 50 to 2000
+trees_values <- seq(50,2000, by=50)
+
+#vectors for storing model metrics
+accuracy_results_trees <- rep(0)
+sensitivity_results_trees <- rep(0)
+specificity_results_trees <- rep(0)
+
+#loop for each number of trees for the model
+for(i in seq_along(trees_values)){
+  #
+  trees <- trees_values[i]
+  #fitting random forest model with mtry of 15 and various number of trees
+  rf_temp <- randomForest(form, data=train_set, mtry=15, ntree=trees)
+  #making predictions
+  rf_temp_preds <- predict(rf_temp, test_set, type='class')
+  
+  #creating confusion matrix
+  test_table <- table(rf_temp_preds, test_set$diagnosis)
+  
+  #true negatives
+  tn <- test_table[1]
+  #flase positives
+  fp <- test_table[2]
+  #flase negatives
+  fn <- test_table[3]
+  #true positives
+  tp <- test_table[4]
+  
+  #creating accuracy, sensitivity, specificity metrics
+  accuracy_results_trees[i] <- ((tp+tn)/(tp+fp+tn+fn))
+  sensitivity_results_trees[i] <- (tp)/(tp+fn)
+  specificity_results_trees[i] <- (tn)/(tn+fp)
+}
+
+#data frame for accuracy, sensitivity, specificity results
+trees_results <- data.frame(trees_values, accuracy_results_trees, sensitivity_results_trees, specificity_results_trees)
+# finding max index for accuracy, sensitivity, specificity results
+trees_acc_max <- which.max(trees_results$accuracy_results_trees)
+trees_sens_max <- which.max(trees_results$sensitivity_results_trees)
+trees_spec_max <- which.max(trees_results$specificity_results_trees)
+
+#displaying max result for accuracy, sensitivity, specificity
+trees_results[trees_acc_max,]
+trees_results[trees_sens_max,]
+trees_results[trees_spec_max,]
+
+#plot ntree accuracy results
+plot(x=trees_values, y=accuracy_results_trees, type='l', col='red',xlab = "trees", ylab = "results", xlim = c(0, 2050), ylim = c(.9, 1))
+#plot ntree sensitivity results
+lines(trees_values, sensitivity_results_trees, col='blue', type='l')
+#plot ntree specificity results
+lines(trees_values, specificity_results_trees, col='green', type='l')
+#legend and title
+legend("bottomright", legend = c("Accuracy", "Sensitivity", "Specificity"), col = c("red","blue","green"), lty=1)
+title(main="Number of trees by 50")
+abline(v=450, lty=2)
+
+```
+
+### Hyper-tuned random forest model
+```{r}
+
+set.seed(1842)
+RandomForest_tuned <- randomForest(form, data=train_set, mtry=15, ntree=450)
+rf_tuned_preds <- predict(rf_tuned, test_set, type='class')
+
+rf_tuned_table <- table(rf_tuned_preds, test_set$diagnosis)
+confusionMatrix(rf_tuned_table, positive = '1')
+
+```
+
+```{r}
+varImpPlot(RandomForest_tuned)
+```
+
+
+
+
+
+## KNN 
+```{r}
+# 95.6% Accuracy, 90.6% Sensitivity
+# Use k around sqrt of n (569)
+knn.24 <- knn(train=train_set[-1], test=test_set[-1], cl=train_set$diagnosis, k=24)
+
+# Confusion matrix and performance metrics
+confusionMatrix(knn.24, as.factor(test_set$diagnosis), positive = '1')
+
+```
+
+### Hyper-tuning k
+```{r}
+set.seed(1842)
+#vector for k values from 1 to 101
+k_values <- seq(1,101, by=2)
+
+#vectors for storing model metrics
+accuracy_results_knn <- rep(0)
+sensitivity_results_knn <- rep(0)
+specificity_results_knn <- rep(0)
+
+#loop for each value of k for the model
+for(i in seq_along(k_values)){
+  #establishing the loops value of k
+  k <- k_values[i]
+  #fitting model with k
+  knn_temp <- knn(train=train_set[-1], test=test_set[-1], cl=train_set$diagnosis, k=k)
+  
+  #creating confusion matrix
+  test_table <- table(knn_temp, test_set$diagnosis)
+  
+  #true negatives
+  tn <- test_table[1]
+  #flase positives
+  fp <- test_table[2]
+  #flase negatives
+  fn <- test_table[3]
+  #true positives
+  tp <- test_table[4]
+  
+  #creating accuracy, sensitivity, specificity metrics
+  accuracy_results_knn[i] <- ((tp+tn)/(tp+fp+tn+fn))
+  sensitivity_results_knn[i] <- (tp)/(tp+fn)
+  specificity_results_knn[i] <- (tn)/(tn+fp)
+  
+}
+
+#data frame for accuracy, sensitivity, specificity results
+knn_results <- data.frame(k_values, accuracy_results_knn, sensitivity_results_knn, specificity_results_knn)
+# finding max index for accuracy, sensitivity, specificity results
+knn_acc_max <- which.max(knn_results$accuracy_results)
+knn_sens_max <- which.max(knn_results$sensitivity_results)
+knn_spec_max <- which.max(knn_results$specificity_results_knn)
+
+#displaying max result for accuracy, sensitivity, specificity
+knn_results[knn_acc_max,]
+knn_results[knn_sens_max,]
+knn_results[knn_spec_max,]
+
+#plot accuracy results
+plot(x=k_values, y=accuracy_results_knn, type='l', col='red',xlab = "K", ylab = "results", xlim = c(0, 103), ylim = c(.8, 1))
+#plot sensitivity results
+lines(k_values, sensitivity_results_knn, col='blue', type='l')
+#plot specificity results
+lines(k_values, specificity_results_knn, col='green', type='l')
+#legend and title
+legend("right", legend = c("Accuracy", "Sensitivity", "Specificity"), col = c("red","blue", "green"), lty=1)
+title(main="Various Values of K")
+abline(v=3, lty=2)
+
+```
+
+### Hyper-tuned knn model
+```{r}
+
+set.seed(1842)
+#fitting model with k=3
+knn_3 <- knn(train=train_set[-1], test=test_set[-1], cl=train_set$diagnosis, k=3)
+#k=3 model results
+confusionMatrix(knn_3, as.factor(test_set$diagnosis), positive = '1')
+
+```
+
+##Logistic Regression
+```{r}
+
+# 93% Accuracy, 90.6% Sensitivity
+# Create the full model
+# Does not converge even after stepAIC
+lr.full <- glm(form, data=train_set, family=binomial, control = list(maxit = 100))
+
+stepAIC(lr.full)
+
+lr.reduced <- glm(formula = diagnosis ~ radius_mean + texture_mean + smoothness_mean + 
+      compactness_mean + concavity_mean + fractal_dimension_mean + 
+      area_se + compactness_se + symmetry_se + fractal_dimension_se + 
+      radius_worst + concave.points_worst + symmetry_worst + fractal_dimension_worst, 
+    family = binomial, data = train_set, control = list(maxit = 50))
+
+# Predict on test set
+lr.preds <- as.factor(round(predict(lr.reduced, test_set, type='response')))
+
+# Confusion matrix and performance metrics
+confusionMatrix(lr.preds, as.factor(test_set$diagnosis), positive = '1')
+
+
+
+```
+
